@@ -117,7 +117,6 @@ const PollingModal = ({ show, purchase, onClose, onConfirmed, onComplete }) => {
     const initializeWebSocket = async () => {
       const ws = new WebSocket(
         `${websocketHost}/api/v2/purchases/${purchase.id}/ws`,
-        [await getToken()],
       );
       wsRef.current = ws;
 

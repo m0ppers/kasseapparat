@@ -8,7 +8,7 @@ import ConfigProvider from "./provider/ConfigProvider";
 function App() {
   return (
     <ConfigProvider>
-      <AuthProvider>
+      <AuthProvider serverState={serverState}>
         <SentryInitializer>
           <Routes />
         </SentryInitializer>

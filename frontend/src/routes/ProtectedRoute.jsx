@@ -13,10 +13,22 @@ export const ProtectedRoute = () => {
       .catch(() => setLoggedIn(false));
   }, [isLoggedIn]);
 
-  // Check if the user is authenticated
+  useEffect(() => {
+    if (loggedIn === false) {
+      window.location.href = "/oidc/login";
+    }
+  }, [loggedIn]);
+
+  // // Check if the user is authenticated
+  // if (loggedIn === false) {
+  //   window.location.href = "/oidc/login";
+  //   // // If not authenticated, redirect to the login page
+  //   // return <Navigate to="/oidc/login" target="_self" />;
+  //   // return <Navigate to="/login" />;
+  // }
+
   if (loggedIn === false) {
-    // If not authenticated, redirect to the login page
-    return <Navigate to="/login" />;
+    return null;
   }
 
   if (loggedIn === null) {

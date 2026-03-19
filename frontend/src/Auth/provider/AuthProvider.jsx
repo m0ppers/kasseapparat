@@ -1,6 +1,7 @@
 import React, {
   createContext,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -11,127 +12,58 @@ import { useConfig } from "../../provider/ConfigProvider";
 
 const AuthContext = createContext();
 
-const AuthProvider = ({ children }) => {
+const AuthProvider = ({ serverState, children }) => {
   const apiHost = useConfig().apiHost;
-  const LOCALSTORAGE_PREFIX = "kasseapparat.auth.";
-  const LOCALSTORAGE_TOKEN_KEY = LOCALSTORAGE_PREFIX + "token";
-  const LOCALSTORAGE_EXPIRY_KEY = LOCALSTORAGE_PREFIX + "expiryDate";
-  const LOCALSTORAGE_USERDATA_KEY = LOCALSTORAGE_PREFIX + "userdata";
   const refreshingPromise = useRef(null);
+  const [expiryDate, setExpiryDate] = useState(serverState.expiryDate);
+  const userData = serverState.userData;
 
-  const updateSession = (token, expiresIn) => {
-    const expiryDate = new Date(
-      // eslint-disable-next-line react-hooks/purity
-      Date.now() + (expiresIn - 30) * 1000,
-    ).toISOString();
-    console.log("Updating session with new expiry date: " + expiryDate);
-
-    setSession({ token: token, expiryDate: expiryDate });
-    localStorage.setItem(LOCALSTORAGE_TOKEN_KEY, token);
-    localStorage.setItem(LOCALSTORAGE_EXPIRY_KEY, expiryDate);
-
-    return token;
-  };
-
-  const removeSession = () => {
-    setSession({ token: null, expiryDate: null });
-    localStorage.removeItem(LOCALSTORAGE_TOKEN_KEY);
-    localStorage.removeItem(LOCALSTORAGE_EXPIRY_KEY);
-  };
-
-  const updateUser = (userdata) => {
-    setUser(userdata);
-    localStorage.setItem(
-      LOCALSTORAGE_PREFIX + "userdata",
-      JSON.stringify(userdata),
-    );
-  };
-
-  const getToken = async () => {
-    const currentDate = new Date();
-    const expiryDate = new Date(session.expiryDate);
-
-    if (session.token && expiryDate > currentDate) {
-      return session.token;
-    } else if (!session.token) {
-      console.log("No token found in session");
-      return null;
+  useEffect(() => {
+    if (!expiryDate) {
+      if (refreshingPromise.current) {
+        clearTimeout(refreshingPromise.current);
+        refreshingPromise.current = null;
+      }
+      return;
     }
 
     if (refreshingPromise.current) {
-      return refreshingPromise.current;
+      return;
     }
+    const d = new Date(expiryDate);
+    const now = new Date();
+    const rand = Math.random() * 10000; // add random time to prevent multiple clients refreshing at the same time
+  
+    const timeout = Math.max(d.getTime() - now.getTime() - 30000 + rand, 0); // refresh 30 seconds before expiry
 
-    console.log("Token expired or missing, starting refresh...");
+    refreshingPromise.current = setTimeout(() => {
+        refreshJwtToken(apiHost)
+          .then((response) => {
+            setExpiryDate(response.expiryDate);
+          })
+          .catch((error) => {
+            console.error("Critical error during token refresh:", error);
+          })
+          .finally(() => {
+            refreshingPromise.current = null;
+          });
+      }, timeout);
+  }, [expiryDate]);
 
-    refreshingPromise.current = refreshJwtToken(apiHost)
-      .then((response) => {
-        const newToken = response.access_token;
-        const expiresIn = response.expires_in || 60;
-
-        updateSession(newToken, expiresIn);
-
-        return newToken;
-      })
-      .catch((error) => {
-        console.error("Critical error during token refresh:", error);
-        removeSession();
-
-        throw error;
-      })
-      .finally(() => {
-        refreshingPromise.current = null;
-      });
-
-    return refreshingPromise.current;
+  const isLoggedIn = () => {
+    console.log(userData)
+    return userData !== null;
   };
-
-  const isLoggedIn = async () => {
-    const token = await getToken();
-    return !!token;
-  };
-
-  const getSessionFromLocalStorage = () => {
-    console.log("Getting session from local storage");
-    const token = localStorage.getItem(LOCALSTORAGE_TOKEN_KEY);
-    const expiryDate = localStorage.getItem(LOCALSTORAGE_EXPIRY_KEY);
-
-    if (!token || !expiryDate) {
-      return { token: null, expiryDate: null };
-    }
-
-    if (new Date(expiryDate) < new Date()) {
-      localStorage.removeItem(LOCALSTORAGE_TOKEN_KEY);
-      localStorage.removeItem(LOCALSTORAGE_EXPIRY_KEY);
-      return { token: null, expiryDate: null };
-    }
-
-    return { token: token, expiryDate: expiryDate };
-  };
-
-  const getUserFromLocalStorage = () => {
-    const userdata = localStorage.getItem(LOCALSTORAGE_USERDATA_KEY);
-
-    return userdata ? JSON.parse(userdata) : null;
-  };
-
-  const [session, setSession] = useState(getSessionFromLocalStorage);
-  const [user, setUser] = useState(getUserFromLocalStorage);
 
   const contextValue = useMemo(
     () => ({
-      getToken: async () => await getToken(),
-      isLoggedIn: async () => await isLoggedIn(),
-      setSession: (token, expiresIn) => updateSession(token, expiresIn),
-      removeSession: () => removeSession(),
-      userdata: user,
-      setUserdata: (userdata) => updateUser(userdata),
-      gravatarUrl: user?.gravatarUrl ?? "",
-      role: user?.role ?? "user",
-      username: user?.username ?? "unknown",
-      id: user?.id ?? 0,
+      isLoggedIn: async () => isLoggedIn(),
+      gravatarUrl: userData?.gravatarUrl ?? "",
+      role: userData?.role ?? "user",
+      username: userData?.username ?? "unknown",
+      id: userData?.id ?? 0,
     }),
-    [session, user],
+    [userData],
   );
 
   // Provide the authentication context to the children components

@@ -1,13 +1,13 @@
 package main
 
 import (
-	"embed"
 	"flag"
 	"log/slog"
 	"os"
 	"strconv"
 	"time"
 
+	"github.com/potibm/kasseapparat/internal/app/auth"
 	config "github.com/potibm/kasseapparat/internal/app/config"
 	"github.com/potibm/kasseapparat/internal/app/exitcode"
 	handlerHttp "github.com/potibm/kasseapparat/internal/app/handler/http"
@@ -20,9 +20,6 @@ import (
 	purchaseService "github.com/potibm/kasseapparat/internal/app/service/purchase"
 	"github.com/potibm/kasseapparat/internal/app/utils"
 )
-
-//go:embed assets
-var staticFiles embed.FS
 
 var (
 	version = "0.0.0"
@@ -56,6 +53,7 @@ func main() {
 	sqliteRepository := sqliteRepo.NewRepository(db, int32(cfg.FormatConfig.FractionDigitsMax))
 	sumupRepository := sumupRepo.NewRepository(initializer.GetSumupService())
 	mailer := initializer.InitializeMailer(cfg.MailerConfig)
+
 	jwtMiddleware := initializer.InitializeJwtMiddleware(sqliteRepository, cfg.JwtConfig)
 
 	purchaseService := purchaseService.NewPurchaseService(
@@ -85,13 +83,17 @@ func main() {
 		AppConfig:       cfg,
 	}
 	httpHandler := handlerHttp.NewHandler(httpHandlerConfig)
+	auth, err := auth.NewAuth(sqliteRepository, cfg)
+	if err != nil {
+		logger.Error("Failed to initialize auth", "error", err)
+		os.Exit(int(exitcode.Software))
+	}
 
 	router, err := initializer.InitializeHttpServer(
 		*httpHandler,
+		auth,
 		websocketHandler,
 		*sqliteRepository,
-		staticFiles,
-		jwtMiddleware,
 		cfg,
 		logger,
 	)

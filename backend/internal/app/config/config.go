@@ -32,6 +32,11 @@ type JwtConfig struct {
 	SecureCookie bool
 }
 
+type SessionConfig struct {
+	Secret string
+	Name   string
+}
+
 type MailerConfig struct {
 	DSN               string
 	FromEmail         string
@@ -53,6 +58,13 @@ type FormatConfig struct {
 	FractionDigitsMax int
 }
 
+type OIDCConfig struct {
+	ClientID     string
+	ClientSecret string
+	IssuerURL    string
+	RedirectURL  string
+}
+
 type CorsAllowOriginsConfig []string
 
 type Config struct {
@@ -63,6 +75,8 @@ type Config struct {
 	PaymentMethods     PaymentMethods
 	SentryConfig       SentryConfig
 	JwtConfig          JwtConfig
+	OIDCConfig         OIDCConfig
+	SessionConfig      SessionConfig
 	CorsAllowOrigins   CorsAllowOriginsConfig
 	FrontendURL        string
 	MailerConfig       MailerConfig
@@ -92,6 +106,10 @@ func loadConfig(logger *slog.Logger) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	sessionConfig, err := loadSessionConfig()
+	if err != nil {
+		return nil, err
+	}
 
 	return &Config{
 		AppConfig:          loadAppConfig(),
@@ -101,6 +119,8 @@ func loadConfig(logger *slog.Logger) (*Config, error) {
 		PaymentMethods:     loadPaymentMethods(),
 		SentryConfig:       loadSentryConfig(),
 		JwtConfig:          loadJwtConfig(),
+		OIDCConfig:         loadOIDCConfig(),
+		SessionConfig:      sessionConfig,
 		CorsAllowOrigins:   corsAllowOriginsConfig,
 		MailerConfig:       loadMailerConfig(),
 		SumupConfig:        loadSumupConfig(),
@@ -155,6 +175,28 @@ func loadJwtConfig() JwtConfig {
 		Secret:       getEnv("JWT_SECRET", ""),
 		SecureCookie: getEnvAsBool("JWT_SECURE_COOKIE", true),
 	}
+}
+
+func loadOIDCConfig() OIDCConfig {
+	return OIDCConfig{
+		ClientID:     getEnv("OIDC_CLIENT_ID", ""),
+		ClientSecret: getEnv("OIDC_CLIENT_SECRET", ""),
+		IssuerURL:    getEnv("OIDC_ISSUER_URL", ""),
+		// this should really be handled internally but there doesn't seem to be an easy to use helper function to get absolute URIs in gin, so we just require it to be set in env
+		// a helper would also probably imply to have some trusted proxy setup so we would need a new env variable anyway
+		RedirectURL: getEnv("OIDC_REDIRECT_URL", ""),
+	}
+}
+
+func loadSessionConfig() (SessionConfig, error) {
+	sessionSecret := getEnv("SESSION_SECRET", "")
+	if sessionSecret == "" {
+		return SessionConfig{}, errors.New("SESSION_SECRET is not set in env")
+	}
+	return SessionConfig{
+		Secret: sessionSecret,
+		Name:   getEnv("SESSION_NAME", "kasseapparat"),
+	}, nil
 }
 
 func loadMailerConfig() MailerConfig {

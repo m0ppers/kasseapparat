@@ -1,19 +1,22 @@
 package initializer
 
 import (
-	"embed"
-	"fmt"
+	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
-	"strings"
+	"text/template"
+	"time"
 
-	jwt "github.com/appleboy/gin-jwt/v3"
 	"github.com/getsentry/sentry-go"
 	sentrygin "github.com/getsentry/sentry-go/gin"
 	"github.com/gin-contrib/cors"
-	"github.com/gin-contrib/static"
+	"github.com/gin-contrib/sessions"
+	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
+	"github.com/olivere/vite"
+	"github.com/potibm/kasseapparat/internal/app/auth"
 	"github.com/potibm/kasseapparat/internal/app/config"
 	httpHandler "github.com/potibm/kasseapparat/internal/app/handler/http"
 	"github.com/potibm/kasseapparat/internal/app/handler/websocket"
@@ -29,18 +32,59 @@ var (
 
 const API_VERSION = "v2"
 
+type PublicUserData struct {
+	GravatarURL string `json:"gravatarUrl"`
+	Role        string `json:"role"`
+	Username    string `json:"username"`
+	ID          uint   `json:"id"`
+}
+
+func (u *PublicUserData) fromUser(user *models.User) {
+	if user == nil {
+		return
+	}
+	u.GravatarURL = user.GravatarURL()
+	u.Role = user.Role()
+	u.Username = user.Username
+	u.ID = user.ID
+}
+
+type serverState struct {
+	UserData   *PublicUserData `json:"userData"`
+	ExpiryDate *time.Time      `json:"expiryDate"`
+}
+
+func newServerState(ctx *gin.Context) serverState {
+	user, exists := auth.GetUserFromContext(ctx)
+	if !exists {
+		return serverState{}
+	}
+	publicUserData := &PublicUserData{}
+	publicUserData.fromUser(user)
+
+	return serverState{
+		UserData:   publicUserData,
+		ExpiryDate: nil,
+	}
+}
+
 func InitializeHttpServer(
 	httpHandler httpHandler.Handler,
+	authImpl auth.Auth,
 	websocketHandler websocket.HandlerInterface,
 	repository sqliteRepo.Repository,
-	staticFiles embed.FS,
-	jwtMiddleware *jwt.GinJWTMiddleware,
 	config config.Config,
 	logger *slog.Logger,
 ) (*gin.Engine, error) {
 	gin.SetMode(config.AppConfig.GinMode)
 
 	r = gin.New()
+	store := cookie.NewStore([]byte(config.SessionConfig.Secret))
+	r.Use(sessions.Sessions(config.SessionConfig.Name, store))
+	r.Use(auth.UserMiddleware(repository))
+
+	authImpl.Register(r)
+
 	r.Use(
 		gin.Recovery(),
 		sentrygin.New(sentrygin.Options{
@@ -53,27 +97,13 @@ func InitializeHttpServer(
 	r.GET("/api/"+API_VERSION+"/purchases/stats", httpHandler.GetPurchaseStats)
 
 	r.Use(CreateCorsMiddleware(config.CorsAllowOrigins))
+	registerApiRoutes(httpHandler, websocketHandler, authImpl)
+	registerVite(r, authImpl, true)
 
-	folder, err := static.EmbedFolder(staticFiles, "assets")
-	if err != nil {
-		return nil, fmt.Errorf("create embedded folder: %w", err)
-	}
-
-	r.Use(static.Serve("/", folder))
-
-	registerAuthMiddleware(jwtMiddleware)
-	registerApiRoutes(httpHandler, websocketHandler, jwtMiddleware)
-
-	r.NoRoute(func(c *gin.Context) {
-		if !strings.HasPrefix(c.Request.RequestURI, "/api") && !strings.Contains(c.Request.RequestURI, ".") {
-			file, _ := staticFiles.ReadFile("assets/index.html")
-			c.Data(
-				http.StatusOK,
-				"text/html; charset=utf-8",
-				file,
-			)
-		}
-	})
+	// r.NoRoute(func(ctx *gin.Context) {
+	// 	// hmm
+	// 	ctx.JSON(http.StatusNotFound, gin.H{"error": "Not Foundaaa"})
+	// })
 
 	return r, nil
 }
@@ -82,8 +112,7 @@ func CreateCorsMiddleware(allowedOrigins []string) gin.HandlerFunc {
 	corsConfig := cors.DefaultConfig()
 	corsConfig.AllowOrigins = allowedOrigins
 	corsConfig.AllowAllOrigins = false
-	corsConfig.AllowCredentials = true
-	corsConfig.AddAllowHeaders("Authorization", "Credentials")
+	corsConfig.AllowCredentials = false
 	corsConfig.AddExposeHeaders("X-Total-Count", "Content-Disposition")
 
 	return cors.New(corsConfig)
@@ -91,7 +120,7 @@ func CreateCorsMiddleware(allowedOrigins []string) gin.HandlerFunc {
 
 func SlogUserID() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		user, exists := c.Get(middleware.IdentityKey)
+		user, exists := c.Get("user")
 		if exists {
 			if user, ok := user.(*models.User); ok {
 				sloggin.AddCustomAttributes(c,
@@ -104,17 +133,9 @@ func SlogUserID() gin.HandlerFunc {
 	}
 }
 
-func registerAuthMiddleware(authMiddleware *jwt.GinJWTMiddleware) {
-	r.Use(middleware.HandlerMiddleWare(authMiddleware))
-
-	versionedGroup := r.Group("/api/" + API_VERSION)
-
-	middleware.RegisterRoute(versionedGroup, authMiddleware)
-}
-
 func SentryMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		user, exists := c.Get(middleware.IdentityKey)
+		user, exists := c.Get("user")
 		if exists {
 			if user, ok := user.(*models.User); ok {
 				sentry.ConfigureScope(func(scope *sentry.Scope) {
@@ -132,11 +153,11 @@ func SentryMiddleware() gin.HandlerFunc {
 func registerApiRoutes(
 	httpHandler httpHandler.Handler,
 	websocketHandler websocket.HandlerInterface,
-	authMiddleware *jwt.GinJWTMiddleware,
-
+	authImpl auth.Auth,
 ) {
+
 	protectedApiRouter := r.Group("/api/" + API_VERSION)
-	protectedApiRouter.Use(authMiddleware.MiddlewareFunc(), SentryMiddleware(), SlogUserID())
+	protectedApiRouter.Use(auth.RequireAuth(), SentryMiddleware(), SlogUserID())
 	{
 		registerProductRoutes(protectedApiRouter, httpHandler)
 		registerProductInterestRoutes(protectedApiRouter, httpHandler)
@@ -157,13 +178,10 @@ func registerApiRoutes(
 	unprotectedApiRouter := r.Group("/api/" + API_VERSION)
 	{
 		unprotectedApiRouter.GET("/config", httpHandler.GetConfig)
-
-		unprotectedApiRouter.POST("/auth/changePasswordToken", httpHandler.RequestChangePasswordToken)
-		unprotectedApiRouter.POST("/auth/changePassword", httpHandler.UpdateUserPassword)
-
 		unprotectedApiRouter.POST("/sumup/webhook", httpHandler.GetSumupTransactionWebhook)
-
 		unprotectedApiRouter.GET("/purchases/:id/ws", websocketHandler.HandleTransactionWebSocket)
+
+		authImpl.RegisterApiRoutes(&httpHandler, unprotectedApiRouter)
 	}
 }
 
@@ -252,3 +270,65 @@ func registerSumupTransactionRoutes(rg *gin.RouterGroup, handler httpHandler.Han
 		sumupTransactions.GET("/:id", handler.GetSumupTransactionByID)
 	}
 }
+
+func registerVite(r *gin.Engine, authImpl auth.Auth, isDev bool) {
+	// Initialize the helper function
+	viteFragment, err := vite.HTMLFragment(vite.Config{
+		FS:        os.DirFS("../frontend/dist"), // Required: Vite build output directory
+		IsDev:     isDev,                        // Required: Development or Production mode
+		ViteURL:   "http://localhost:5173",      // Optional: Defaults to this URL
+		ViteEntry: "src/main.jsx",               // Optional: Depends on your frontend setup
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	// Create a template
+	tmpl := template.Must(template.New("index").Parse(indexTemplate))
+	r.NoRoute(func(ctx *gin.Context) {
+		ctx.Status(http.StatusOK)
+		serverState := newServerState(ctx)
+		// marshal server state to json and pass it to the template
+		serverStateJson, err := json.Marshal(serverState)
+		pageData := map[string]any{
+			"Vite":        viteFragment,
+			"ServerState": string(serverStateJson),
+		}
+
+		err = tmpl.Execute(ctx.Writer, pageData)
+		if err != nil {
+			http.Error(ctx.Writer, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+	})
+}
+
+const indexTemplate = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" /> 
+    <meta
+        name="description"
+        content="Small Point-of-Sale System for demoparties"
+    />
+    <!--
+      manifest.json provides metadata used when your web app is installed on a
+      user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
+          -->
+        <link rel="manifest" href="/manifest.json" />
+        <title>Kasseapparat</title>
+        <script>
+			const serverState = {{ .ServerState }};
+        </script>
+        {{ .Vite.Tags }}
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+  </body>
+</html>
+`

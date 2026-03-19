@@ -21,12 +21,11 @@ const handleFetchError = async (response) => {
 };
 
 // Authenticated GET helper
-const get = async (url, token) => {
+const get = async (url) => {
   const response = await fetch(url, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
   });
   if (!response.ok) await handleFetchError(response);
@@ -34,12 +33,11 @@ const get = async (url, token) => {
 };
 
 // Authenticated POST helper
-const post = async (url, token, body) => {
+const post = async (url, body) => {
   const response = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(body),
   });
@@ -48,26 +46,20 @@ const post = async (url, token, body) => {
 };
 
 // Fetch all visible products
-export const fetchProducts = async (apiHost, jwtToken) => {
+export const fetchProducts = async (apiHost) => {
   const url = `${apiHost}/api/v2/products?_end=1000&_sort=pos&_order=asc&_filter_hidden=true`;
-  return get(url, jwtToken);
+  return get(url);
 };
 
 // Fetch guests for a specific product
-export const fetchGuestlistByProductId = async (
-  apiHost,
-  jwtToken,
-  productId,
-  query,
-) => {
+export const fetchGuestlistByProductId = async (apiHost, productId, query) => {
   const url = `${apiHost}/api/v2/products/${productId}/guests?q=${query}`;
-  return get(url, jwtToken);
+  return get(url);
 };
 
 // Store a new purchase
 export const storePurchase = async (
   apiHost,
-  jwtToken,
   cart,
   paymentMethodCode,
   paymentMethodData = {},
@@ -92,22 +84,22 @@ export const storePurchase = async (
     ...paymentMethodData,
   };
 
-  return post(`${apiHost}/api/v2/purchases`, jwtToken, payload);
+  return post(`${apiHost}/api/v2/purchases`, payload);
 };
 
 // Fetch all confirmed purchases for a user
-export const fetchPurchases = async (apiHost, jwtToken, userId) => {
+export const fetchPurchases = async (apiHost, userId) => {
   const url = `${apiHost}/api/v2/purchases?createdById=${encodeURIComponent(userId)}&status=confirmed`;
-  return get(url, jwtToken);
+  return get(url);
 };
 
 // Refund a purchase by ID
-export const refundPurchaseById = async (apiHost, jwtToken, purchaseId) => {
+export const refundPurchaseById = async (apiHost, purchaseId) => {
   const url = `${apiHost}/api/v2/purchases/${purchaseId}/refund`;
-  return post(url, jwtToken, {});
+  return post(url, {});
 };
 
 // Add interest in a product
-export const addProductInterest = async (apiHost, jwtToken, productId) => {
-  return post(`${apiHost}/api/v2/productInterests`, jwtToken, { productId });
+export const addProductInterest = async (apiHost, productId) => {
+  return post(`${apiHost}/api/v2/productInterests`, { productId });
 };

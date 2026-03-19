@@ -31,7 +31,7 @@ const Kasseapparat = () => {
   const [products, setProducts] = useState(null);
   const [purchaseHistory, setPurchaseHistory] = useState(null);
   const [errorMessage, setErrorMessage] = useState("");
-  const { username, getToken, id: userId } = useAuth();
+  const { username, id: userId } = useAuth();
   const [pollingModalOpen, setPollingModalOpen] = useState(false);
   const [onPollingComplete, setOnPollingComplete] = useState(() => () => {});
   const [pendingPurchase, setPendingPurchase] = useState(null);
@@ -51,7 +51,7 @@ const Kasseapparat = () => {
 
   useEffect(() => {
     const getProducts = async () => {
-      return fetchProducts(apiHost, await getToken())
+      return fetchProducts(apiHost)
         .then((products) => setProducts(convertProductsWithDecimals(products)))
         .catch((error) =>
           showError(
@@ -60,7 +60,7 @@ const Kasseapparat = () => {
         );
     };
     const getHistory = async () => {
-      fetchPurchases(apiHost, await getToken(), userId)
+      fetchPurchases(apiHost, userId)
         .then((history) => setPurchaseHistory(history))
         .catch((error) =>
           showError(
@@ -71,7 +71,7 @@ const Kasseapparat = () => {
     };
     getProducts();
     getHistory();
-  }, [apiHost, userId, getToken]);
+  }, [apiHost, userId]);
 
   const handleAddToCart = (product, count = 1, listItem = null) => {
     setCart(addToCart(cart, product, count, listItem));
@@ -87,8 +87,7 @@ const Kasseapparat = () => {
 
   const handleRemoveAllFromCart = async () => {
     setCart(removeAllFromCart());
-    const token = await getToken();
-    fetchProducts(apiHost, token)
+    fetchProducts(apiHost)
       .then((products) => setProducts(convertProductsWithDecimals(products)))
       .catch((error) =>
         showError("There was an error fetching the products: " + error.message),
@@ -104,10 +103,9 @@ const Kasseapparat = () => {
   };
 
   const handleRemoveFromPurchaseHistory = async (purchase) => {
-    return refundPurchaseById(apiHost, await getToken(), purchase.id)
+    return refundPurchaseById(apiHost, purchase.id)
       .then(async () => {
-        const token = await getToken();
-        fetchPurchases(apiHost, token, userId)
+        fetchPurchases(apiHost, userId)
           .then((history) => setPurchaseHistory(history))
           .catch((error) =>
             showError(
@@ -115,7 +113,7 @@ const Kasseapparat = () => {
                 error.message,
             ),
           );
-        fetchProducts(apiHost, token)
+        fetchProducts(apiHost)
           .then((products) =>
             setProducts(convertProductsWithDecimals(products)),
           )
@@ -140,7 +138,6 @@ const Kasseapparat = () => {
     try {
       const createdPurchase = await storePurchase(
         apiHost,
-        await getToken(),
         cart,
         paymentMethodCode,
         paymentMethodData,
@@ -194,7 +191,7 @@ const Kasseapparat = () => {
 
       setCart(checkoutCart());
       handleAddToPurchaseHistory(createdPurchase);
-      fetchProducts(apiHost, await getToken())
+      fetchProducts(apiHost)
         .then((products) => setProducts(convertProductsWithDecimals(products)))
         .catch((error) =>
           showError(
@@ -208,7 +205,7 @@ const Kasseapparat = () => {
 
   const handleAddProductInterest = async (product) => {
     console.log("Adding product interest for product: ", product.id);
-    return addProductInterest(apiHost, await getToken(), product.id)
+    return addProductInterest(apiHost, product.id)
       .then(() => {
         product.soldOutRequestCount++;
       })

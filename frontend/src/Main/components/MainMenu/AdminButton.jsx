@@ -16,7 +16,6 @@ const AdminButton = ({ className }) => {
     if (!currentUserInAdmin) {
       currentUserInAdmin = JSON.stringify({
         ID: userdata.id,
-        token: await getToken(),
         username: userdata.username,
         role: userdata.role,
         expire: expiryDate,

@@ -2,20 +2,12 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import flowbiteReact from "flowbite-react/plugin/vite";
-import basicSsl from "@vitejs/plugin-basic-ssl";
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss(), flowbiteReact(), basicSsl()],
+  plugins: [react(), tailwindcss(), flowbiteReact()],
   server: {
-    port: 3000,
-    proxy: {
-      "/api": {
-        target: "http://localhost:3001",
-        changeOrigin: true,
-        ws: true,
-      },
-    },
+    port: 5173,
   },
   test: {
     // 👋 add the line below to add jsdom to vite
@@ -26,5 +18,12 @@ export default defineConfig({
     coverage: {
       reporter: ["text", "html", "lcov"],
     },
+  },
+  // generates .vite/manifest.json in outDir
+  manifest: true,
+  emptyOutDir: false,
+  rollupOptions: {
+    // overwrite default .html entry
+    input: "/src/main.jsx",
   },
 });

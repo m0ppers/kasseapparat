@@ -42,7 +42,6 @@ const GuestlistModal = ({
       try {
         let response = await fetchGuestlistByProductId(
           apiHost,
-          await getToken(),
           product.id,
           query,
         );
