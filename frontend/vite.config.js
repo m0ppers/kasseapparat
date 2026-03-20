@@ -19,11 +19,13 @@ export default defineConfig({
       reporter: ["text", "html", "lcov"],
     },
   },
-  // generates .vite/manifest.json in outDir
-  manifest: true,
-  emptyOutDir: false,
-  rollupOptions: {
-    // overwrite default .html entry
-    input: "/src/main.jsx",
+  build: {
+    // generates .vite/manifest.json in outDir
+    manifest: true,
+    emptyOutDir: false,
+    rollupOptions: {
+      // overwrite default .html entry
+      input: "/src/main.jsx",
+    },
   },
 });

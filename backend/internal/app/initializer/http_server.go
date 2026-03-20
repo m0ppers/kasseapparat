@@ -1,12 +1,12 @@
 package initializer
 
 import (
+	"embed"
 	"encoding/json"
+	"io/fs"
 	"log/slog"
-	"net/http"
 	"os"
 	"strconv"
-	"text/template"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -72,6 +72,7 @@ func InitializeHttpServer(
 	httpHandler httpHandler.Handler,
 	authImpl auth.Auth,
 	websocketHandler websocket.HandlerInterface,
+	staticFiles embed.FS,
 	repository sqliteRepo.Repository,
 	config config.Config,
 	logger *slog.Logger,
@@ -98,7 +99,7 @@ func InitializeHttpServer(
 
 	r.Use(CreateCorsMiddleware(config.CorsAllowOrigins))
 	registerApiRoutes(httpHandler, websocketHandler, authImpl)
-	registerVite(r, authImpl, true)
+	registerVite(r, staticFiles, config.AppConfig.GinMode != "release")
 
 	// r.NoRoute(func(ctx *gin.Context) {
 	// 	// hmm
@@ -271,64 +272,97 @@ func registerSumupTransactionRoutes(rg *gin.RouterGroup, handler httpHandler.Han
 	}
 }
 
-func registerVite(r *gin.Engine, authImpl auth.Auth, isDev bool) {
+func registerVite(r *gin.Engine, staticFiles embed.FS, isDev bool) {
 	// Initialize the helper function
-	viteFragment, err := vite.HTMLFragment(vite.Config{
-		FS:        os.DirFS("../frontend/dist"), // Required: Vite build output directory
-		IsDev:     isDev,                        // Required: Development or Production mode
-		ViteURL:   "http://localhost:5173",      // Optional: Defaults to this URL
-		ViteEntry: "src/main.jsx",               // Optional: Depends on your frontend setup
-	})
+	var config vite.Config
+	if isDev {
+		config = vite.Config{
+			FS:        os.DirFS("../frontend/dist"), // Point to the frontend directory in development
+			IsDev:     true,
+			ViteURL:   "http://localhost:5173",
+			PublicFS:  os.DirFS("../frontend/public"),
+			ViteEntry: "src/main.jsx",
+		}
+	} else {
+		assetsFs, err := fs.Sub(staticFiles, "assets")
+		if err != nil {
+			slog.Error("Error creating sub file system for static files", "error", err)
+			panic(err)
+		}
+		config = vite.Config{
+			FS:        assetsFs, // Use the embedded filesystem in production
+			IsDev:     false,
+			ViteEntry: "src/main.jsx",
+		}
+	}
+
+	// slog.Info("Registering Vite with file system", "isDev", isDev)
+	// viteFragment, err := vite.HTMLFragment(vite.Config{
+	// 	FS:        fsImpl,                  // Required: Vite build output directory
+	// 	IsDev:     isDev,                   // Required: Development or Production mode
+	// 	ViteURL:   "http://localhost:5173", // Optional: Defaults to this URL
+	// 	ViteEntry: "src/main.jsx",          // Optional: Depends on your frontend setup
+	// })
+	// if err != nil {
+	// 	panic(err)
+	// }
+
+	// // Create a template
+	// tmpl := template.Must(template.New("index").Parse(indexTemplate))
+	// r.NoRoute(func(ctx *gin.Context) {
+	// 	ctx.Status(http.StatusOK)
+	// 	serverState := newServerState(ctx)
+	// 	// marshal server state to json and pass it to the template
+	// 	serverStateJson, err := json.Marshal(serverState)
+	// 	pageData := map[string]any{
+	// 		"Vite":        viteFragment,
+	// 		"ServerState": string(serverStateJson),
+	// 	}
+
+	// 	err = tmpl.Execute(ctx.Writer, pageData)
+	// 	if err != nil {
+	// 		http.Error(ctx.Writer, err.Error(), http.StatusInternalServerError)
+	// 		return
+	// 	}
+
+	// })
+
+	viteHandler, err := vite.NewHandler(config)
 	if err != nil {
+		slog.Error("Error initializing Vite handler", "error", err)
 		panic(err)
 	}
 
-	// Create a template
-	tmpl := template.Must(template.New("index").Parse(indexTemplate))
-	r.NoRoute(func(ctx *gin.Context) {
-		ctx.Status(http.StatusOK)
+	// Create a new handler.
+	handler := func(ctx *gin.Context) {
+		// ctx.Status(http.StatusOK)
 		serverState := newServerState(ctx)
 		// marshal server state to json and pass it to the template
 		serverStateJson, err := json.Marshal(serverState)
-		pageData := map[string]any{
-			"Vite":        viteFragment,
-			"ServerState": string(serverStateJson),
-		}
-
-		err = tmpl.Execute(ctx.Writer, pageData)
 		if err != nil {
-			http.Error(ctx.Writer, err.Error(), http.StatusInternalServerError)
+			slog.Error("Error marshaling server state to JSON", "error", err)
+			ctx.AbortWithStatusJSON(httpHandler.InternalServerError.Code, gin.H{"error": "Internal Server Error"})
+			return
+		}
+		r := ctx.Request
+		w := ctx.Writer
+		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+			// Serve the index.html file.
+			requestCtx := r.Context()
+
+			// create a script tag containing the server state json
+			scriptTag := `<script>const serverState = ` + string(serverStateJson) + `;</script>`
+
+			requestCtx = vite.ScriptsToContext(requestCtx, scriptTag)
+
+			viteHandler.ServeHTTP(w, r.WithContext(requestCtx))
 			return
 		}
 
-	})
-}
+		slog.Info("Serving static file", "path", r.URL.Path)
 
-const indexTemplate = `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <link rel="icon" href="/favicon.ico" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#000000" /> 
-    <meta
-        name="description"
-        content="Small Point-of-Sale System for demoparties"
-    />
-    <!--
-      manifest.json provides metadata used when your web app is installed on a
-      user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
-          -->
-        <link rel="manifest" href="/manifest.json" />
-        <title>Kasseapparat</title>
-        <script>
-			const serverState = {{ .ServerState }};
-        </script>
-        {{ .Vite.Tags }}
-  </head>
-  <body>
-    <noscript>You need to enable JavaScript to run this app.</noscript>
-    <div id="root"></div>
-  </body>
-</html>
-`
+		viteHandler.ServeHTTP(w, r)
+	}
+
+	r.NoRoute(handler)
+}

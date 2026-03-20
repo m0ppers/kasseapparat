@@ -1,6 +1,7 @@
 package main
 
 import (
+	"embed"
 	"flag"
 	"log/slog"
 	"os"
@@ -20,6 +21,9 @@ import (
 	purchaseService "github.com/potibm/kasseapparat/internal/app/service/purchase"
 	"github.com/potibm/kasseapparat/internal/app/utils"
 )
+
+//go:embed all:assets
+var staticFiles embed.FS
 
 var (
 	version = "0.0.0"
@@ -93,6 +97,7 @@ func main() {
 		*httpHandler,
 		auth,
 		websocketHandler,
+		staticFiles,
 		*sqliteRepository,
 		cfg,
 		logger,
