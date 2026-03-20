@@ -139,7 +139,7 @@ func (auth *OIDCAuth) getOrCreateUserFromToken(c *gin.Context, token *oauth2.Tok
 	// HOWEVER as we only have one OIDC provider and we are either allowing OIDC or classic auth this should be safe
 	// IF auth isn't going to be changed after initial deployment and if we never have more than one OIDC provider this is NOT safe.
 	user, err := auth.repository.GetUserByEmail(userInfo.Email)
-	if err != nil {
+	if err != nil && err != sqliteRepo.ErrUserNotFoundByEmail {
 		return nil, err
 	}
 	claims := userInfoClaims{}
