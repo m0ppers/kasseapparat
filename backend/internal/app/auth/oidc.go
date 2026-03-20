@@ -101,9 +101,13 @@ func (auth *OIDCAuth) oidcLogin(c *gin.Context) {
 	session.Set("oidc_state", state)
 	session.Set("oidc_nonce", nonce)
 	session.Set("oidc_code_verifier", codeVerifier)
-	session.Save()
+	err = session.Save()
+	if err != nil {
+		_ = c.Error(kasseHttp.InternalServerError.WithCauseMsg(err))
+		return
+	}
 	authURL := auth.config.oauth2.AuthCodeURL(state, oidc.Nonce(nonce), codeChallenge)
-	slog.Info("Redirecting to OIDC provider", slog.String("authURL", authURL))
+	slog.Info("Redirecting to OIDC provider", slog.String("authURL", authURL), "session", session.Get("oidc_state"), "code_verifier", session.Get("oidc_code_verifier"))
 	c.Redirect(http.StatusFound, authURL)
 }
 
@@ -182,8 +186,15 @@ func (auth *OIDCAuth) oidcCallback(c *gin.Context) {
 
 	session.Set("refresh_token", token.RefreshToken)
 	session.Set("user_id", int(user.ID))
-	session.Set("expiry", token.Expiry)
+	session.Set("expiry", token.Expiry.Format(time.RFC3339))
 	session.Save()
+	err = session.Save()
+	if err != nil {
+		slog.Error("fail", "error", err)
+		_ = c.Error(kasseHttp.InternalServerError.WithCauseMsg(err))
+		return
+	}
+	slog.Info("session after login", "session", session.Get("user_id"))
 	c.Redirect(http.StatusFound, "/")
 }
 
